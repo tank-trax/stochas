@@ -28,6 +28,17 @@ SeqAudioProcessor::SeqAudioProcessor()  :
 {
    //_CrtSetBreakAlloc(18151);
 
+   // are we in standalone mode?
+   // if so, determine our reference point, etc
+   if(wrapperType == wrapperType_Standalone) {
+      mStandaloneTempo=(double)SEQ_DEFAULT_STANDALONE_BPM;
+      mStandaloneStartTime=Time::getMillisecondCounterHiRes();
+      // default play mode is set to manual so that play button shows
+      SequenceData *d=mData.getUISeqData();
+      d->setAutoPlayMode(SEQ_PLAYMODE_INSTANT);
+      mData.swap();
+   }
+
    memset(mMiniMidiMap, 0, sizeof(MiniMidiMapItem*) * 128);
 
    // init all the layers
@@ -192,7 +203,7 @@ void SeqAudioProcessor::resetMiniMidiMap()
    }
 }
 
-// check the midi mapping. if any mapping for playback start/stop, grab it
+// check the midi mapping. if any mapping for playback start/stop or record start/stop, grab it
 void SeqAudioProcessor::rebuildMiniMidiMap()
 {
    // this rebuilds our linked list hash mechanism to optimize for
@@ -207,7 +218,7 @@ void SeqAudioProcessor::rebuildMiniMidiMap()
    // build new
    for (i = 0; i < len; i++) {
       SeqMidiMapItem *mm = sd->getMappingItem(i);
-      if (mm->mAction == SEQMIDI_ACTION_PLAYBACK && mm->mValue != 0 &&
+      if ((mm->mAction == SEQMIDI_ACTION_PLAYBACK || mm->mAction == SEQMIDI_ACTION_RECORD) && mm->mValue != 0 &&
          mm->mChannel != 0 && mm->mNote >= 0) {
 
          if (!mMiniMidiMap[mm->mNote]) {
@@ -249,9 +260,8 @@ void SeqAudioProcessor::requestManualPlayback(bool start)
 }
 
 // the only midi messages we handle here right now are ones related to manual playback
-// which can't be handled by stocha engines as they assume they are already playing
-// react determines whether we do something about it (as opposed to just returning whether
-// its handled)
+// and recording which can't be handled by stocha engines as they assume they are already 
+// playing, and don't know anything about recording
 void
 SeqAudioProcessor::handleMiniMidiMap(int type, char number, char chan, char)
 {
@@ -259,28 +269,56 @@ SeqAudioProcessor::handleMiniMidiMap(int type, char number, char chan, char)
    // this is an array sized to number of midi notes
    jassert(number >= 0);
 
+   SequenceData *seq = mData.getAudSeqData();
+
    mi = mMiniMidiMap[number];
    while (mi) {
       if (mi->mChannel == chan && mi->mType == type) {
          switch (mi->mValue) {
-         case SEQMIDI_VALUE_PLAYBACK_START:
-            requestManualPlayback(true);
+         case SEQMIDI_VALUE_PLAYBACK_START:            
+            // only react if we are not in auto play mode
+            if(seq->getAutoPlayMode() != SEQ_PLAYMODE_AUTO) {
+               requestManualPlayback(true);
+            }
             break;
          case SEQMIDI_VALUE_PLAYBACK_STOP:
-            requestManualPlayback(false);
+            // only react if we are not in auto play mode
+            if(seq->getAutoPlayMode() != SEQ_PLAYMODE_AUTO) {
+               requestManualPlayback(false);
+            }
             break;
          case SEQMIDI_VALUE_PLAYBACK_TOGGLE:
-            if (mMPBstate == MPBstopped)
-               requestManualPlayback(true);
-            else // started or standby
-               requestManualPlayback(false);
+            // only react if we are not in auto play mode
+            if(seq->getAutoPlayMode() != SEQ_PLAYMODE_AUTO) {
+               if (mMPBstate == MPBstopped)
+                  requestManualPlayback(true);
+               else // started or standby
+                  requestManualPlayback(false);
+            }
+            break;
+         case SEQMIDI_VALUE_RECORD_START:
+            if(!mRecordingMode) {
+               mRecordingMode=true;
+               recordingModeChanged();
+            }
+            break;
+         case SEQMIDI_VALUE_RECORD_STOP:
+            if(mRecordingMode) {
+               mRecordingMode=false;
+               recordingModeChanged();
+            }            
+            break;
+         case SEQMIDI_VALUE_RECORD_TOGGLE:
+            mRecordingMode=!mRecordingMode;
+            recordingModeChanged();
             break;
          default:
-            jassertfalse;
-         }         
+            jassertfalse;            
+         }
       }
       mi = mi->mNext;
    }
+   
 }
 
 // this handles incoming midi messages and outputs messages that need to be
@@ -353,7 +391,7 @@ void SeqAudioProcessor::handleIncomingMidi(bool currentlyPlaying,
             // if recording (which doesn't care whether we are responding or not, if the user hits
             // record, it's assumed they want to respond to midi) then build up our buffer with
             // those notes
-            if (mRecordingMode && (msg.isNoteOn() || msg.isNoteOff())) {
+            if (mRecordingMode && !handled && (msg.isNoteOn() || msg.isNoteOff())) {
                recordedNotes.addEvent(msg, position);
             }
 
@@ -374,7 +412,7 @@ void SeqAudioProcessor::handleIncomingMidi(bool currentlyPlaying,
 
 }
 
-// we need to check to see if there are midi messages that cause start/stop
+// we need to check to see if there are midi messages that cause play/record start/stop
 // so we can react to them before we determine playback state
 void 
 SeqAudioProcessor::checkIncomingMidiForStartStop(MidiBuffer &midiMessages)
@@ -385,8 +423,7 @@ SeqAudioProcessor::checkIncomingMidiForStartStop(MidiBuffer &midiMessages)
    // scan thru the buffer and react to note on/off
    for (const MidiMessageMetadata it : midiMessages) {
       MidiMessage msg = it.getMessage();
-      int position = it.samplePosition;
-
+     
       char midiNumber = 0; // note number or cc number
       char midiChan = 0;
       char midiType = 0; // noteon or cc
@@ -492,6 +529,8 @@ void SeqAudioProcessor::checkforUIIncomingData(MidiBuffer & processedMidi)
     *  new mapping has been created
     *      1 - SEQ_REFRESH_MAP_MSG
     *      2 and 3 are meaningless
+    *  in standalone mode, tempo has been changed by the user
+    *      1 - SEQ_STANDALONE_SET_TEMPO
     */
 
    while (mIncomingData.readFromFifo(&fifoData1, &fifoData2, &fifoData3)) {
@@ -532,21 +571,7 @@ void SeqAudioProcessor::checkforUIIncomingData(MidiBuffer & processedMidi)
       case SEQ_SET_RECORD_MODE:
          // ui thread can turn on/off record mode with a toggle
          mRecordingMode = !mRecordingMode;
-         if (!mRecordingMode) // if turning off, notify. 
-            mNotifier.setRecordingState(SeqProcessorNotifier::off);
-         else { // recording is turning on
-            if (!mPlaying) // if toggling it on and we are not playing, 
-               mNotifier.setRecordingState(SeqProcessorNotifier::standby);
-            else {
-               mNotifier.setRecordingState(SeqProcessorNotifier::on);
-               // get everything ready for recording
-               mNotifier.clearCompletedMidiNotes();
-               // and clear out the collector buffer
-               memset(mMidiRecord, 0, sizeof(mMidiRecord));
-            }
-
-         }
-
+         recordingModeChanged();
          break;
 
       case SEQ_SET_PLAY_START_STOP:
@@ -558,6 +583,11 @@ void SeqAudioProcessor::checkforUIIncomingData(MidiBuffer & processedMidi)
             else // started or requested
                requestManualPlayback(false);            
          } // if playmode is not auto
+         break;
+      
+      case SEQ_STANDALONE_SET_TEMPO:
+         // tempo changed in standalone mode by user
+         changeStandaloneTempo();
          break;
       default:
          jassertfalse;
@@ -684,6 +714,78 @@ SeqAudioProcessor::determinePlaybackState(int apm, bool playingInDaw,
    return areWePlaying;
 }
 
+// For standalone mode, playback is considered to have started as soon as the app loads
+// (this refers to 'daw' playback. in standalone mode we default to playback type 'instant'
+// which means that stochas only starts playing when play button is hit),
+// so we just need to calculate our beat position based on that
+double SeqAudioProcessor::getStandaloneBeatPosition()
+{
+   double currentTime=Time::getMillisecondCounterHiRes();
+   
+   // elapsed m/s since start
+   double elapsed=currentTime-mStandaloneStartTime;
+
+   // tempo in beats per ms
+   double bpms=mStandaloneTempo / (60*1000);
+
+   // how many beats have elapsed since play start
+   return elapsed*bpms;
+}
+
+// called when the recording mode has toggled, either via the ui or via
+// midi mapping
+void SeqAudioProcessor::recordingModeChanged()
+{
+   if (!mRecordingMode) // if turning off, notify. 
+      mNotifier.setRecordingState(SeqProcessorNotifier::off);
+   else { // recording is turning on
+      if (!mPlaying) // if toggling it on and we are not playing, 
+         mNotifier.setRecordingState(SeqProcessorNotifier::standby);
+      else {
+         mNotifier.setRecordingState(SeqProcessorNotifier::on);
+         // get everything ready for recording
+         mNotifier.clearCompletedMidiNotes();
+         // and clear out the collector buffer
+         memset(mMidiRecord, 0, sizeof(mMidiRecord));
+      }
+   }
+}
+
+// fill in position info in standalone mode.
+// we will need all the same fields that we use in processBlock.
+void SeqAudioProcessor::positionInfoStandalone(AudioPlayHead::CurrentPositionInfo *posinfo)
+{
+   memset(posinfo, 0, sizeof(AudioPlayHead::CurrentPositionInfo));
+   posinfo->bpm=mStandaloneTempo;
+   posinfo->timeSigNumerator=4;
+   posinfo->timeSigDenominator=4;
+   posinfo->isPlaying=true;
+   posinfo->ppqPosition = getStandaloneBeatPosition();
+
+}
+
+// set new tempo for standalone.
+// we need to reset the start time so that there is not a big
+// jump in position if the tempo change is gradual.
+// To do this, just calculate when the start time would have been
+// if the new tempo were in effect, and set it to that
+void SeqAudioProcessor::changeStandaloneTempo() {
+
+   double currentTime=Time::getMillisecondCounterHiRes();
+   SequenceData *seq = mData.getAudSeqData();
+   double newTempo=seq->getStandaloneBPM();
+   double beatPos=getStandaloneBeatPosition();
+
+   // new tempo in ms per beat
+   double new_mspb = (60*1000)/newTempo;
+
+   // set the start time to reflect new tempo
+   mStandaloneStartTime = currentTime - (new_mspb * beatPos);
+
+   // set the new tempo from our sequence data
+   mStandaloneTempo = newTempo;
+}
+
 void SeqAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midiMessages)
 {
    
@@ -706,8 +808,30 @@ void SeqAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midi
    buffer.clear();
 
    // retrieve some important info (ppqposition might be negative <ahem>cubase)
-   if( ph )
-       ph->getCurrentPosition(posinfo);
+   if(wrapperType == wrapperType_Standalone) { 
+      // in standalone mode, fake it out
+      positionInfoStandalone(&posinfo);
+   } else {
+      ph->getCurrentPosition(posinfo);
+   }
+
+   // BITWIG FIX
+   // I'm not entirely happy with this fix as it seems there must be a better way...
+   // In Bitwig it's possible for the ppqPosition to be negative if
+   // the pre-roll is turned on. This will bail if ppqposition is negative
+   // and is not going to be positive in this block. If it is going to be
+   // positive in this block, then just set it to 0 so it's not negative
+   // (otherwise we possibly miss notes at the first position in the grid).
+   if(posinfo.ppqPosition < 0 ) {
+      // samples per beat
+      double s = (60.0 *  getSampleRate()) / (posinfo.bpm);
+      // ppq pos is in beats
+      if ((posinfo.ppqPosition*s)+ buffer.getNumSamples() >=0)      
+         posinfo.ppqPosition = 0;
+      else
+         return;
+   }
+   // END BITWIG FIX
 
    // position adjustment (which is a problem with protools and nothing else)
    // getPPQOffset should be an atomic operation.
@@ -729,16 +853,17 @@ void SeqAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midi
       mCubaseAtRestPos = 0.0;
 #endif
 
+   // check incoming midi to see if manual play start/stop, or a record start/stop is received.
+   // needs to be done before determining playback below, so that we can capture
+   // a message that might tell us to start playback. Also, for recording, since the engines 
+   // don't handle record start/stop, we need to check for those messages as well
+   checkIncomingMidiForStartStop(midiMessages);
+
    // determine whether we are currently playing
    if (seq->getAutoPlayMode() == SEQ_PLAYMODE_AUTO) // if autoplay is on
       // determined by daw alone
       areWePlaying = posinfo.isPlaying;
    else {
-      // check incoming midi to see if manual play start/stop is received.
-      // needs to be done before determining playback below, so that we can capture
-      // a message that might tell us to start playback
-      checkIncomingMidiForStartStop(midiMessages);
-
       // determined by manual playback, quantize, etc.
       // this will also transition state between standby/play/stop
       // and also send notification and setup mMPBStartPosition
@@ -813,7 +938,10 @@ void SeqAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midi
             ,
             2000037797,
             300045709,
-            40044757,
+            40044757
+#if(SEQ_MAX_LAYERS>4)
+#error "Need to add some prime numbers to the array now"
+#endif
 #endif
          };
          // now set the seed for each of the engines
@@ -831,8 +959,8 @@ void SeqAudioProcessor::processBlock(AudioSampleBuffer& buffer, MidiBuffer& midi
    // handle mapped midi, learn midi, midi light
    // pass the data on to processedMidi if we are passing through data
    // pass data to recordedNotes if recording is active
-   handleIncomingMidi(mPlaying, startingPlayback, midiMessages, processedMidi,recordedNotes);
 
+   handleIncomingMidi(mPlaying, startingPlayback, midiMessages, processedMidi,recordedNotes);
    if (stoppingPlayback) {
       // quiesce all playing notes if we are stopping
       for (i = 0; i < SEQ_MAX_LAYERS; i++)
@@ -992,6 +1120,9 @@ void SeqAudioProcessor::setStateInformation (const void* in , int size)
       if (persist.retrieve(mData.getUISeqData(), xml.get()))
          mData.swap();
    }
+
+   // tempo in saved state might differ, we need to recalculate some stuff here
+   changeStandaloneTempo();
 
    // if we happen to be playing back at the time, we need to have the stocha's
    // rebuild their midi mapping schemas

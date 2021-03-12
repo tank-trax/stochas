@@ -151,6 +151,9 @@ public:
    void setPPQOffset(int offset);
    int getPPQOffset();
 
+   void setScaleFactor(int factor);
+   int getScaleFactor();
+
 private:
    // read or write settings to the config file
    void configSerialization(bool read);
@@ -188,6 +191,7 @@ private:
    int mSelectedHighCol;
    int mKeyboardDisabled;
    int mPPQOffset;
+   int mScaleFactor;
 public:
 };
 
@@ -198,7 +202,6 @@ class SeqAudioProcessor;
 // TODO not sure if it really belongs here
 class SeqGlob {
 public:
-   void *mAlertListener;
    EditorState *mEditorState;
    SeqDataBuffer *mSeqBuf;
    SeqProcessorNotifier *mAudNotify;
@@ -223,6 +226,10 @@ public:
    {
       // tell it to call changeNotify when some data changes
       mSeqBuf->setChangeNotify(changeNotify, this);
+   }
+
+   ~SeqGlob() {
+      mSeqBuf->setChangeNotify(0,0);
    }
 
 };

@@ -24,11 +24,10 @@
 #define SEQ_CO_NAME  "AudioVitamins"
 
 // for help button
-#define SEQ_HELP_URL  "https://github.com/rudeog/stochas_open/raw/master/install/user_manual.pdf"
-#define SEQ_WEBSITE_URL  "https://github.com/rudeog/stochas_open"
-// obfuscate 
-#define SEQ_HELP_EMAIL "stochas" \
-                        "@" "binarydog.com"
+#define SEQ_HELP_URL  "https://stochas.org/documentation/"
+#define SEQ_WEBSITE_URL  "https://stochas.org"
+
+#define SEQ_RESIZE_MSG "UI was resized. Depending on your host application, you might need to restart Stochas to properly adjust the window size"
 
 // add some code to get around cubase behavior where it actually starts play position prior to
 // where the cursor is when user hits play. if any issues arise, disable this to see if the workaround
@@ -79,6 +78,11 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQ_POS_OFFSET_MIN    -500
 #define SEQ_POS_OFFSET_MAX    500
 
+// ui scaling
+#define SEQ_UI_SCALE_DEFAULT  100
+#define SEQ_UI_SCALE_MIN      100
+#define SEQ_UI_SCALE_MAX      200
+
 // duty cycle in % (101 is legato)
 #define SEQ_DUTY_MIN          5
 #define SEQ_DUTY_MAX          200   // anything above 100% is legato
@@ -100,7 +104,7 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQ_MAX_LAYERS        4
 
 // max number of source cells for a column of targets (each column shares the array)
-#define SEQ_MAX_CHAIN_SOURCES 24
+#define SEQ_MAX_CHAIN_SOURCES 48
 
 #define SEQ_CHAIN_FLAG_USED   1
 // a chain is effective when the source cell triggered in the last cycle.
@@ -169,6 +173,8 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQ_PLAYMODE_STEP           2 // play starts on next step
 #define SEQ_PLAYMODE_BEAT           3 // play starts on next beat
 #define SEQ_PLAYMODE_MEASURE        4 // play starts on next measure
+
+#define SEQ_DEFAULT_STANDALONE_BPM  120 // default bpm in standalone mode
 
 /*====UI RELATED CONSTANTS====================================================*/
 
@@ -250,8 +256,8 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQCTL_PLAYBACK_MODE_Q_MEAS  5
 #define SEQCTL_PLAY_BUTTON          32 //* play button
 #define SEQCTL_INFODIALOG           33 // * info dialog itself (will notify when its done)
-
-
+#define SEQCTL_STANDALONE_BPM_BUTTON 34 // for standalone mode only
+#define SEQCTL_SIZE_PANIC           35 // * press to restore UI size to default
 
 ///////////////////////
 // OPTION TAB PANEL IDS
@@ -302,6 +308,8 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQCTL_SET_COLOR            7
 #define SEQCTL_SET_SHIFTREV         9
 #define SEQCTL_SET_POSOFFSET        10
+#define SEQCTL_SET_UISCALE          11
+
 
 
 ///////////////////////////
@@ -335,6 +343,7 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQMIDI_ACTION_RESET  6     // reset one of the above to default (use id above to signify which)
 #define SEQMIDI_ACTION_PBIAS  7     // poly bias (variable. value passed will be the cc value) 
 #define SEQMIDI_ACTION_PLAYBACK 8   // start/stop playback (not layer specific)
+#define SEQMIDI_ACTION_RECORD 9   // start/stop record (not layer specific)
 
 // midi mapping
 // targets (1-4 are layers 1-4)
@@ -357,6 +366,10 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQMIDI_VALUE_PLAYBACK_START  1
 #define SEQMIDI_VALUE_PLAYBACK_STOP   2
 #define SEQMIDI_VALUE_PLAYBACK_TOGGLE 3
+// values for RECORD 
+#define SEQMIDI_VALUE_RECORD_START  4
+#define SEQMIDI_VALUE_RECORD_STOP   5
+#define SEQMIDI_VALUE_RECORD_TOGGLE 6
 
 // midi mapping
 // values for speed (use options panel clock divider code)
@@ -393,6 +406,7 @@ in mono mode are 0..high val where 0 is off, and the following applies
 #define SEQ_NOTIFY_HOST    101  // notify host that a change has occurred so that it knows the state is dirty
 #define SEQ_SET_RECORD_MODE 102 // notify processor thread that recording is on/off (toggle)
 #define SEQ_SET_PLAY_START_STOP 103 // notify processor that manual playback is started (1) or stopped (0)
+#define SEQ_STANDALONE_SET_TEMPO 104 // standalone tempo is changed by the user
 
 // automation target constants
 

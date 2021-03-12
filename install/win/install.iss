@@ -1,10 +1,11 @@
 ; 
 ; Source directories
-;
-#define vst64 "Z:\dev\src\stochas_open\build\stochas_artefacts\Release"
-#define vst32 "Z:\dev\src\stochas_open\build32\stochas_artefacts\Release"
+; stochas_version must be defined externally
+; these paths are relative to the .iss file
+#define vst64 "..\..\build\stochas_artefacts\Release"
+#define vst32 "..\..\build32\stochas_artefacts\Release"
 #ifndef stochas_version
-#define stochas_version "99.99.99"
+#define stochas_version "0.0.0"
 #endif
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
@@ -16,12 +17,12 @@ AppName=Stochas
 AppVersion={#stochas_version}
 ;AppVerName=Stochas 1.0
 AppPublisher=Open Source Software
-AppPublisherURL=https://github.com/rudeog/stochas_open
-AppSupportURL=https://github.com/rudeog/stochas_open
-AppUpdatesURL=https://github.com/rudeog/stochas_open
+AppPublisherURL=https://github.com/surge-synthesizer/stochas
+AppSupportURL=https://github.com/surge-synthesizer/stochas
+AppUpdatesURL=https://github.com/surge-synthesizer/stochas
 ; complains if we don't have this
 DefaultDirName=stochas
-;DefaultGroupName=Stochas
+DefaultGroupName=Surge Synth Team
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 LicenseFile=license.txt
@@ -32,15 +33,22 @@ UninstallFilesDir={code:install_dir}\stochas_uninst
 UsePreviousAppDir=no
 ShowComponentSizes=no
 DirExistsWarning=no
+AllowNoIcons=yes
 ;EnableDirDoesntExistWarning=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
-Source: "{#vst32}\vst\stochas.dll"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(0)
-Source: "{#vst64}\vst\stochas.dll"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(1)
-Source: "{#vst32}\VST3\Stochas.vst3\Contents\x86-win\Stochas.vst3"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(2)
-Source: "{#vst64}\VST3\Stochas.vst3\Contents\x86_64-win\Stochas.vst3"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(3)
-
+Source: "{#vst32}\VST3\Stochas.vst3\Contents\x86-win\Stochas.vst3"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(0)
+Source: "{#vst64}\VST3\Stochas.vst3\Contents\x86_64-win\Stochas.vst3"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(1)
+Source: "{#vst32}\Standalone\Stochas.exe"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(2)
+Source: "{#vst64}\Standalone\Stochas.exe"; DestDir: "{code:install_dir}"; Flags: ignoreversion; Check: check_inst(3)
+[Icons]
+Name: "{group}\Stochas (32 bit)"; Filename: "{code:install_dir}\Stochas.exe"; WorkingDir: "{code:install_dir}"; Check: check_inst(2) 
+Name: "{group}\Stochas (64 bit)"; Filename: "{code:install_dir}\Stochas.exe"; WorkingDir: "{code:install_dir}"; Check: check_inst(3)
+Name: "{group}\Uninstall Stochas (32 bit) Plugin"; Filename: "{uninstallexe}"; Check: check_inst(0) 
+Name: "{group}\Uninstall Stochas (64 bit) Plugin"; Filename: "{uninstallexe}"; Check: check_inst(1) 
+Name: "{group}\Uninstall Stochas (32 bit)"; Filename: "{uninstallexe}"; Check: check_inst(2) 
+Name: "{group}\Uninstall Stochas (64 bit)"; Filename: "{uninstallexe}"; Check: check_inst(3) 
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 [Code]
 var
@@ -55,49 +63,42 @@ begin
     'Plugin Type', 'Select the type of plugin to install.',
     'Please specify the version of the Stochas plugin that is applicable to your needs, then click Next.',
     True, False);
-  PluginTypePage.Add('VST2 32 bit');
-  PluginTypePage.Add('VST2 64 bit');
   PluginTypePage.Add('VST3 32 bit');
   PluginTypePage.Add('VST3 64 bit');
-  
+  PluginTypePage.Add('Standalone 32 bit');
+  PluginTypePage.Add('Standalone 64 bit');
 
   DataDirPage := CreateInputDirPage(wpSelectDir,
-    'VST Plugin Directory', 'Select VST plugin directory',
-    'Please select the directory where your plug-ins are registered with your audio application, then click Next. If you do not know what this is consult your audio application''s manual.',
+    'Installation Directory', 'Select target directory',
+    'Please select the directory in which Stochas will be installed, then click Next.',
     False, '');
   DataDirPage.Add('');
-end;
 
-function ShouldSkipPage(PageID: Integer): Boolean;
-begin
-  { Skip directory selection on all except vst2 }
-  if (PageID = DataDirPage.ID) and (PluginTypePage.SelectedValueIndex > 1) then
-    Result := True  
-  else
-    Result := False;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
     if (CurPageID = PluginTypePage.ID) then
     begin
-      if(PluginTypePage.SelectedValueIndex = 0) then {vst2 32 }
-        vstpath:=ExpandConstant('{pf32}') + '\Steinberg\Vstplugins\'
-      else if (PluginTypePage.SelectedValueIndex = 1) then {vst2 64 }
-        vstpath:=ExpandConstant('{pf64}') + '\Steinberg\Vstplugins\'
-      else if (PluginTypePage.SelectedValueIndex = 2) then {vst3 32 }
+      if (PluginTypePage.SelectedValueIndex = 0) then {vst3 32 }
         vstpath:=ExpandConstant('{pf32}') + '\Common Files\VST3\'
-      else if (PluginTypePage.SelectedValueIndex = 3) then  {vst3 64 }
+      else if (PluginTypePage.SelectedValueIndex = 1) then  {vst3 64 }
         vstpath:=ExpandConstant('{pf64}') + '\Common Files\VST3\'
+      else if (PluginTypePage.SelectedValueIndex = 2) then  {sa 32 }
+        vstpath:=ExpandConstant('{pf32}') + '\Stochas\'
+      else if (PluginTypePage.SelectedValueIndex = 3) then  {sa 64 }
+        vstpath:=ExpandConstant('{pf64}') + '\Stochas\';
 
       DataDirPage.Values[0] := vstpath;
+
     end;
-    
+
     if(CurPageID = DataDirPage.ID) then
     begin
        vstpath := DataDirPage.Values[0];
     end;
-      
+
+
     Result := True;
 end;
 

@@ -35,7 +35,7 @@ class SeqAudioProcessorEditor  : public AudioProcessorEditor,
    public Label::Listener, public ActionListener
 {
    LookAndFeel_V3 mLookAndFeel; // maintain the v3 look and feel
-   SeqAudioProcessor& processor;
+   SeqAudioProcessor& mProcessor;
    // ================see the SeqAudioProcessorEditor ctor for more comments on each of these
    SeqGlob mGlob;
    Component mStepHolder;  
@@ -60,9 +60,10 @@ class SeqAudioProcessorEditor  : public AudioProcessorEditor,
    
    ToggleCpt mSectionSelect;
    SeqTabbedCpt mMainTabs;
-   ImageComponent mLogo;
    Label mLblLayerName;
    Label mLblPatternName;
+   Label mLblBPM; // standalone mode only
+   NumberCpt mBPM;  // standalone mode only
    //----------------------------- groove tab
    TabPanelCpt mTabGroove;
    GrooveCpt mGroove;
@@ -100,9 +101,12 @@ class SeqAudioProcessorEditor  : public AudioProcessorEditor,
    Label mLblRandomization;
    ToggleCpt mRandomToggle;
 
+   
+
    SeqHelpBanner mHelpBanner;
    ToggleCptWithLabel mLayerToggle;
    Label mLayerLabel;
+   ButtonCpt mUISizePanic;          // zorder should be higher than layer label (does this do it?)
    Label mSectionLabel;
    SeqEditDialog mEditDialog;
    SeqInfoDialog mInfoDialog;
@@ -120,8 +124,6 @@ class SeqAudioProcessorEditor  : public AudioProcessorEditor,
    // will be false if this is not the first time they have shown the UI for
    // this instance of the plugin
    bool mFirstTimeEditor;
-   // set alert text which stays up for a few seconds
-   void setAlertText(const String &txt);
    // set active chord for painting, -1 is off
    void chordSelect(int id);
    void fixButtonColors();
@@ -140,6 +142,8 @@ class SeqAudioProcessorEditor  : public AudioProcessorEditor,
    void savePatch(const String &fn);
    void checkForRecordedNotes();
 public:
+   // set alert text which stays up for a few seconds
+   void setAlertText(const String &txt);
    
     SeqAudioProcessorEditor (SeqAudioProcessor&);
     ~SeqAudioProcessorEditor();

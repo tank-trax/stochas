@@ -6,17 +6,20 @@
 #   cmake -B build -DSTOCHAS_VERSION=xxx, etc.
 #   cmake --build build  --config Release
 #
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.16)
 
-# default to 10.12 (might work with an earlier version, i dont know)
+# always statically link c runtime on windows
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# default to 10.11 (earlier versions will fail)
 if (NOT DEFINED STOCHAS_MAC_SDK_VER)
-  set(STOCHAS_MAC_SDK_VER 10.12)
+  set(STOCHAS_MAC_SDK_VER 10.11)
 endif()
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET ${STOCHAS_MAC_SDK_VER} CACHE STRING "Build for ${STOCHAS_MAC_SDK_VER}")
 
 if (NOT DEFINED STOCHAS_VERSION)
-  set (STOCHAS_VERSION 0.9.0)
+  set (STOCHAS_VERSION 1.3.0)
 endif()  
 
 project(Stochas VERSION ${STOCHAS_VERSION})
@@ -49,9 +52,13 @@ message( STATUS "Is Synth: ${STOCHAS_IS_SYNTH}, Is Midi Effect: ${STOCHAS_IS_MID
 set(STOCHAS_CATEGORY "Effect") # original was "Instrument"
 add_subdirectory(lib/JUCE)
 
-# create version.h and allow it to be referenced
-configure_file(src/version.h.in version.h)
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+add_custom_target( git-info BYPRODUCTS ${CMAKE_BINARY_DIR}/geninclude/version.cpp
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMAND ${CMAKE_COMMAND} -D PROJECT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}  -D PROJECT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+                           -D STOCHASSRC=${CMAKE_SOURCE_DIR} -D STOCHASBLD=${CMAKE_BINARY_DIR}
+                           -D AZURE_PIPELINE=${AZURE_PIPELINE}
+                           -P ${CMAKE_SOURCE_DIR}/cmake/versiontools.cmake
+                           )
 
 # if you want vst2, you need to specify VST2_PATH in your environment
 if (DEFINED VST2_PATH)
@@ -60,8 +67,6 @@ if (DEFINED VST2_PATH)
   set(VST2 "VST")
 endif()
 
-
-
 # `juce_add_plugin` adds a static library target with the name passed as the first argument
 # (AudioPluginExample here). This target is a normal CMake target, but has a lot of extra properties set
 # up by default. As well as this shared code static library, this function adds targets for each of
@@ -69,20 +74,24 @@ endif()
 # Check the readme at `docs/CMake API.md` in the JUCE repo for the full list.
 
 juce_add_plugin(stochas
-    COMPANY_NAME "Audio Vitamins"
-    BUNDLE_ID "com.audiovitamins.stochas"
+    COMPANY_NAME "Surge Synth Team"
+    BUNDLE_ID "org.surge-synth-team.stochas"
     DESCRIPTION "Stochas Randomization Enabled Step Sequencer"
+    ICON_BIG   "${CMAKE_CURRENT_SOURCE_DIR}/image/app_logo_512.png"
     IS_SYNTH ${STOCHAS_IS_SYNTH}
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT ${STOCHAS_IS_MIDI_EFFECT}  
     # EDITOR_WANTS_KEYBOARD_FOCUS TRUE/FALSE    # Does the editor need keyboard focus?
     # COPY_PLUGIN_AFTER_BUILD TRUE/FALSE        # Should the plugin be installed to a default location after building?
-    PLUGIN_MANUFACTURER_CODE AuVi
+    PLUGIN_MANUFACTURER_CODE AuVi               # allows compatibility with older patches from AV days
     PLUGIN_CODE Stoc
-    FORMATS VST3 ${VST2} AU AUv3 Standalone     # The formats to build. Other valid formats are: AAX Unity VST AU AUv3
+    FORMATS VST3 ${VST2} AU Standalone     # The formats to build. Other valid formats are: AAX Unity VST AU AUv3
     VST3_CATEGORIES ${STOCHAS_CATEGORY} 
     PRODUCT_NAME "Stochas")        # The name of the final executable, which can differ from the target name
+
+add_dependencies( stochas git-info )
+include_directories( src )
 
 juce_generate_juce_header(stochas)  
 
@@ -108,7 +117,8 @@ target_sources(stochas PRIVATE
     src/SettingsTab.cpp
     src/StepPanel.cpp
     src/StochaEngine.cpp
-    
+
+    ${CMAKE_BINARY_DIR}/geninclude/version.cpp
     )
 
 # `target_compile_definitions` adds some preprocessor definitions to our target. In a Projucer
@@ -124,7 +134,11 @@ target_compile_definitions(stochas
     JUCE_WEB_BROWSER=0  # If you remove this, add `NEEDS_WEB_BROWSER TRUE` to the `juce_add_plugin` call
     JUCE_USE_CURL=0     # If you remove this, add `NEEDS_CURL TRUE` to the `juce_add_plugin` call
     JUCE_VST3_CAN_REPLACE_VST2=0
- 
+
+    # GPL3 Plugs can disable splash screen
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_REPORT_APP_USAGE=0
+
     # Some linux options
     JUCE_JACK=1
     JUCE_ALSA=1
@@ -142,13 +156,13 @@ juce_add_binary_data(assets NAMESPACE SeqImageX SOURCES
     image/not.png
     image/play.png
     image/play2.png
-    image/Stochas-logo.png
+    image/logo_no_bg.png
     image/x-mark-4-64.png
+    text/infobox.txt
     )
 
 set_target_properties(assets PROPERTIES
     POSITION_INDEPENDENT_CODE TRUE)
-
 
 # `target_link_libraries` links libraries and JUCE modules to other libraries or executables. Here,
 # we're linking our executable target to the `juce::juce_audio_utils` module. Inter-module
@@ -162,61 +176,16 @@ target_link_libraries(stochas PRIVATE
   juce::juce_audio_plugin_client
   )
 
-
-add_custom_target( installer-pkg )
 if( APPLE )
-  add_dependencies( installer-pkg stochas_AU )
-endif()
-if( VST2 )
-  add_dependencies( installer-pkg stochas_VST2 )
-endif()
-add_dependencies( installer-pkg stochas_VST3 )
-add_dependencies( installer-pkg stochas_Standalone )
-
-get_target_property( ZIP_FROM_DIR stochas RUNTIME_OUTPUT_DIRECTORY )
-set( INSTALLER_DIR ${CMAKE_BINARY_DIR}/product )
-execute_process(
-  COMMAND git log -1 --format=%h
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  OUTPUT_VARIABLE GIT_COMMIT_HASH
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-set( INSTALLER_BASENAME "stochas-${GIT_COMMIT_HASH}" )
-
-if( APPLE )
+  add_custom_target( install-au-local )
+  add_dependencies( install-au-local stochas_AU )
   add_custom_command(
-    TARGET installer-pkg
+    TARGET install-au-local
     POST_BUILD
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory  ${INSTALLER_DIR}
-    COMMAND hdiutil create ${INSTALLER_DIR}/${INSTALLER_BASENAME}-macos.dmg -ov -volname "${INSTALLER_BASENAME}-${GIT_COMMIT_HASH}" -fs HFS+ -srcfolder ${ZIP_FROM_DIR}
-    COMMAND echo hdiutil create ${INSTALLER_DIR}/${INSTALLER_BASENAME}-macos.dmg -ov -volname "${INSTALLER_BASENAME}-${GIT_COMMIT_HASH}" -fs HFS+ -srcfolder ${ZIP_FROM_DIR}
+    COMMAND echo "Installing audio unit locally"
+    COMMAND rsync -r --delete "${ZIP_FROM_DIR}/AU/Stochas.component/" "\${HOME}/Library/Audio/Plug-Ins/Components/Stochas.component/"
+    COMMAND auval -vt aumi AuVi
     )
-elseif( UNIX )
-  execute_process(
-    COMMAND uname -m
-    OUTPUT_VARIABLE LINUX_BUILD_ARCH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
 
-  add_custom_command(
-    TARGET installer-pkg
-    POST_BUILD
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory  ${INSTALLER_DIR}
-    COMMAND ls -l ${OUTPUT_DIR}
-    COMMAND cd ${ZIP_FROM_DIR} && tar czf "${INSTALLER_DIR}/${INSTALLER_BASENAME}-linux-${LINUX_BUILD_ARCH}.tgz" .
-    )
-else()
-  file( TO_NATIVE_PATH "${INSTALLER_DIR}/${INSTALLER_BASENAME}-win-x64.zip" OUTPUT_ZIP )
-  add_custom_command(
-    TARGET installer-pkg
-    POST_BUILD
-    WORKING_DIRECTORY ${WELL_NAMED_ASSET_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory  ${INSTALLER_DIR}
-    COMMAND powershell Compress-Archive 
-             -DestinationPath "${OUTPUT_ZIP}"
-             -Force
-             -Path "${ZIP_FROM_DIR}"
-    )
 endif()
